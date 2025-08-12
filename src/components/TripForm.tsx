@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { format } from "date-fns";
-import { Calendar as CalendarIcon, Loader2 } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -31,6 +31,8 @@ const formSchema = z.object({
 export function TripForm() {
   const [open, setOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const { toast } = useToast();
 
   const N8N_WEBHOOK_URL = "https://n8n.1to10x.ai/webhook/ai-trip-advisor";
@@ -40,10 +42,15 @@ export function TripForm() {
     defaultValues: { Origin: "", Destination: "", Activities: "", "Number of Travelers": 1, Email: "" },
   });
 
-  // Handles submission: validates, formats date fields, posts to webhook, and shows toasts.
+  // Handles submission with a guaranteed 10s loading overlay
+  function delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
     // Set loading immediately so UI reflects pending state
     setIsSubmitting(true);
+    setShowOverlay(true);
     // Ensure no stray hash navigation interferes with UX
     try {
       if (window.location.hash) {
@@ -56,20 +63,31 @@ export function TripForm() {
         "Departure Date": format(values["Departure Date"], "yyyy-MM-dd"),
         "Return Date": format(values["Return Date"], "yyyy-MM-dd"),
       };
-      await axios.post(N8N_WEBHOOK_URL, payload);
-      toast({
-        title: "Success! Your journey is being planned.",
-        description: "Your personalized itinerary will arrive in your inbox shortly.",
-        className: "bg-green-700 text-white border-green-700",
-      });
-      setOpen(false);
-      form.reset();
+      // Run webhook and enforce a minimum 10s loading
+      await Promise.all([axios.post(N8N_WEBHOOK_URL, payload), delay(10000)]);
+      toast(
+        "Success! Your journey is being planned.",
+        {
+          description: "Your personalized itinerary will arrive in your inbox shortly.",
+          className: "bg-green-700 text-white border-green-700",
+        }
+      );
+      setShowSuccess(true);
+      // Brief success state, then close dialog and reset overlay
+      setTimeout(() => {
+        setOpen(false);
+        form.reset();
+        setShowOverlay(false);
+        setShowSuccess(false);
+      }, 1200);
     } catch (error) {
-      toast({
-        title: "Something went wrong.",
-        description: "There was a problem with your request. Please try again.",
-        variant: "destructive" as any,
-      });
+      toast.error(
+        "Something went wrong.",
+        {
+          description: "There was a problem with your request. Please try again.",
+        }
+      );
+      setShowOverlay(false);
     } finally {
       // Always clear loading, success or error
       setIsSubmitting(false);
@@ -77,6 +95,7 @@ export function TripForm() {
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button id="tripform-trigger" size="lg" className="bg-blue-500 hover:bg-blue-600 text-white font-bold text-lg py-7 px-8 rounded-full shadow-lg shadow-blue-500/30 transition-all duration-300 hover:scale-105" aria-busy={isSubmitting}>
@@ -215,13 +234,43 @@ export function TripForm() {
               disabled={isSubmitting}
               className="w-full bg-blue-500 hover:bg-blue-600 !mt-6"
             >
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Craft My Itinerary
+              {showSuccess ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <CheckCircle2 className="h-5 w-5" />
+                  Success
+                </span>
+              ) : isSubmitting ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Planning...
+                </span>
+              ) : (
+                'Craft My Itinerary'
+              )}
             </Button>
           </form>
         </Form>
       </DialogContent>
     </Dialog>
+    {showOverlay && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+        <div className="text-center">
+          {showSuccess ? (
+            <div className="flex flex-col items-center gap-3">
+              <CheckCircle2 className="h-12 w-12 text-green-400" />
+              <p className="text-lg text-slate-200">Success! Finalizing your itinerary...</p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-400" />
+              <p className="text-lg text-slate-200">Planning your dream trip...</p>
+              <p className="text-sm text-slate-400">This takes ~10 seconds as we analyze flights, hotels, and activities.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
